@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { User, ChevronDown, RotateCcw } from "lucide-react";
+import { User, ChevronDown, RotateCcw, Upload } from "lucide-react";
 import { getTab1Data } from "../../services/googleSheetsService";
+import * as XLSX from "xlsx";
 
 export function Header({
   title,
@@ -14,6 +15,7 @@ export function Header({
   const [projects, setProjects] = useState<string[]>([]);
   const [allProjects, setAllProjects] = useState<string[]>([]);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
+  const [importing, setImporting] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -155,6 +157,76 @@ export function Header({
     onFilterChange({ year: "all", project: "all" });
   };
 
+  const handleFileUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const data = await readExcelFile(file);
+      await uploadToGoogleSheets(data);
+      alert("นำเข้าข้อมูลสำเร็จแล้ว!");
+
+      // Refresh data
+      window.location.reload();
+    } catch (error) {
+      console.error("Import error:", error);
+      alert("นำเข้าข้อมูลไม่สำเร็จ: " + error);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const readExcelFile = (file: File): Promise<any[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result;
+          const workbook = XLSX.read(data, { type: "binary" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          resolve(jsonData);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsBinaryString(file);
+    });
+  };
+
+  const uploadToGoogleSheets = async (data: any[]) => {
+    const apiUrl =
+      (import.meta as any).env?.VITE_IMPORT_API_URL ||
+      "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec";
+
+    console.log("Uploading data:", data);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "importData",
+        data: data,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Upload failed: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log("Upload result:", result);
+    return result;
+  };
+
   return (
     <div className="h-auto bg-slate-950/80 backdrop-blur-sm sticky top-0 z-40">
       <div className="h-16 flex items-center justify-between px-8 border-b border-slate-800">
@@ -207,6 +279,26 @@ export function Header({
               title="Clear Filter"
             >
               Clear
+            </button>
+          </div>
+
+          <div className="flex flex-col justify-end">
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileUpload}
+              className="hidden"
+              id="file-upload"
+              disabled={importing}
+            />
+            <button
+              onClick={() => document.getElementById("file-upload")?.click()}
+              disabled={importing}
+              className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 border border-green-600 rounded text-white focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              title="Import Data"
+            >
+              <Upload size={16} />
+              {importing ? "กำลังนำเข้า..." : "นำเข้าข้อมูล"}
             </button>
           </div>
         </div>

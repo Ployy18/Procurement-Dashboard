@@ -941,7 +941,7 @@ export function ProcurementOverview({
 
                       <div className="space-y-2">
                         <h5 className="text-sm font-medium text-gray-700 mb-2">
-                          Line Items:
+                          Items:
                         </h5>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
