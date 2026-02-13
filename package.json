@@ -4,8 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite"
+    "build": "npx vite build",
+    "dev": "npx vite"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -86,10 +86,5 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=10.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    }
   }
 }
