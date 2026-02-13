@@ -727,7 +727,7 @@ export function ProcurementOverview({
                       {supplier.name}
                     </td>
                     <td className="px-4 py-3 text-gray-900 font-bold">
-                      ฿{supplier.totalAmount.toLocaleString()}
+                      {supplier.totalAmount.toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -883,10 +883,10 @@ export function ProcurementOverview({
             <div className="px-6 py-4 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  PO Details -{" "}
+                  Po details -{" "}
                   {selectedSupplierPOs[0]?.poNumber
-                    ? `PO ${selectedSupplierPOs[0]?.poNumber}`
-                    : "Supplier POs"}
+                    ? `Po ${selectedSupplierPOs[0]?.poNumber}`
+                    : "Supplier pos"}
                 </h3>
                 <button
                   onClick={closeModal}
@@ -924,7 +924,7 @@ export function ProcurementOverview({
                       <div className="flex items-center justify-between mb-3">
                         <div>
                           <h4 className="font-semibold text-gray-900">
-                            PO #{po.poNumber}
+                            Po #{po.poNumber}
                           </h4>
                           <p className="text-sm text-gray-500">
                             {po.date
@@ -934,14 +934,14 @@ export function ProcurementOverview({
                         </div>
                         <div className="text-right">
                           <p className="text-lg font-bold text-gray-900">
-                            ฿{po.totalAmount.toLocaleString()}
+                            {po.totalAmount.toLocaleString()}
                           </p>
                         </div>
                       </div>
 
                       <div className="space-y-2">
                         <h5 className="text-sm font-medium text-gray-700 mb-2">
-                          Line Items:
+                          Line items:
                         </h5>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
@@ -979,7 +979,7 @@ export function ProcurementOverview({
                                       {item.description || "-"}
                                     </td>
                                     <td className="px-3 py-2 text-right font-medium text-gray-900">
-                                      ฿{item.amount.toLocaleString()}
+                                      {item.amount.toLocaleString()}
                                     </td>
                                   </tr>
                                 ),
