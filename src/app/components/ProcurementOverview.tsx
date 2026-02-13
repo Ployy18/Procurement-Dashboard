@@ -318,7 +318,7 @@ export function ProcurementOverview({
           {} as Record<string, number>,
         );
 
-        // Convert to array and calculate growth
+        // Convert to array and calculate spend share
         const sortedSuppliers = Object.values(supplierStats)
           .map((supplier) => {
             const previousAmount = previousYearStats[supplier.name] || 0;
@@ -336,7 +336,21 @@ export function ProcurementOverview({
           })
           .sort((a, b) => Number(b.totalAmount) - Number(a.totalAmount));
 
-        setSupplierData(sortedSuppliers);
+        // Calculate total spend for share calculation
+        const totalSpend = sortedSuppliers.reduce(
+          (sum, supplier) => sum + Number(supplier.totalAmount),
+          0,
+        );
+
+        // Add spend share to each supplier
+        const suppliersWithShare = sortedSuppliers.map((supplier) => ({
+          ...supplier,
+          spendShare: parseFloat(
+            ((Number(supplier.totalAmount) / totalSpend) * 100).toFixed(1),
+          ),
+        }));
+
+        setSupplierData(suppliersWithShare);
         setCurrentPage(1); // Reset to first page when data changes
 
         // Calculate category spending from df_LINE (filteredLineData)
@@ -437,7 +451,7 @@ export function ProcurementOverview({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ChartContainer
           title="Expense Trend Analysis"
-          subtitle="Monthly Spending Overview"
+          subtitle="Monthly spending overview"
           className="lg:col-span-2"
           delay={0.5}
         >
@@ -511,12 +525,12 @@ export function ProcurementOverview({
         </ChartContainer>
 
         <ChartContainer
-          title="Spending by Category"
-          subtitle="Total spending by category"
+          title="Cost Allocation by Category"
+          subtitle="Breakdown of procurement expenses by category"
           delay={0.6}
         >
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={categoryData} layout="vertical">
+            <BarChart data={categoryData}>
               <CartesianGrid
                 strokeDasharray="3 3"
                 stroke="#e5e7eb"
@@ -567,8 +581,8 @@ export function ProcurementOverview({
 
       {/* Supplier Analysis */}
       <ChartContainer
-        title="Supplier Spend Overview"
-        subtitle="Top suppliers by total spending"
+        title="Supplier Spend Analysis"
+        subtitle="Spend share and growth by supplier"
         delay={0.7}
       >
         <div className="overflow-x-auto">
@@ -579,7 +593,7 @@ export function ProcurementOverview({
                 <th className="px-4 py-3">Supplier Name</th>
                 <th className="px-4 py-3">Total Amount</th>
                 <th className="px-4 py-3">PO count</th>
-                <th className="px-4 py-3 rounded-r-lg">Spending Growth %</th>
+                <th className="px-4 py-3 rounded-r-lg">Spend Share (%)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -621,25 +635,10 @@ export function ProcurementOverview({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        {supplier.growthRate > 0 ? (
-                          <>
-                            <span className="text-green-600 font-medium text-sm">
-                              +{supplier.growthRate}%
-                            </span>
-                            <span className="text-xs text-gray-500">YoY</span>
-                          </>
-                        ) : supplier.growthRate < 0 ? (
-                          <>
-                            <span className="text-red-600 font-medium text-sm">
-                              {supplier.growthRate}%
-                            </span>
-                            <span className="text-xs text-gray-500">YoY</span>
-                          </>
-                        ) : (
-                          <span className="text-gray-500 font-medium text-sm">
-                            0%
-                          </span>
-                        )}
+                        <span className="text-blue-600 font-medium text-sm">
+                          {supplier.spendShare}%
+                        </span>
+                        <span className="text-xs text-gray-500">Share</span>
                       </div>
                     </td>
                   </tr>
