@@ -162,9 +162,9 @@ export function ForecastPlanning() {
   const getPeriodLabel = useCallback((period: string) => {
     switch (period) {
       case "1year":
-        return "6 เดือนข้อมูลย้อนหลัง";
+        return "Last 6 Months";
       case "2years":
-        return "18 เดือนข้อมูลย้อนหลัง";
+        return "Last 18 Months";
       default:
         return period;
     }
