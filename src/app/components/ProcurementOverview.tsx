@@ -127,73 +127,124 @@ export function ProcurementOverview({
           );
         }
 
-        // Extract unique PO.NO. values from df_HEADER
-        const uniquePOs = new Set(filteredTab1Data.map((row) => row["PO.NO."]));
+        // Extract unique PO.NO. values from df_HEADER (exclude cancelled POs)
+        const uniquePOs = new Set(
+          filteredTab1Data
+            .filter((row) => {
+              const poStatus = String(row["PO Status"] || "").toLowerCase();
+              const poNumber = String(row["PO.NO."] || "").toLowerCase();
+              const isCancelled =
+                poStatus.includes("[poยกเลิก]") ||
+                poNumber.includes("[poยกเลิก]");
+              return !isCancelled;
+            })
+            .map((row) => row["PO.NO."]),
+        );
         setUniquePOCount(uniquePOs.size);
 
-        // Calculate total amount from df_HEADER
+        // Calculate total amount from df_HEADER (exclude cancelled POs)
         const total = filteredTab1Data.reduce((sum, row) => {
-          const amount = parseFloat(
-            row["Total Amount"]?.toString().replace(/,/g, "") || "0",
-          );
-          return sum + amount;
-        }, 0);
-        setTotalAmount(total);
+          const poStatus = String(row["PO Status"] || "").toLowerCase();
+          const poNumber = String(row["PO.NO."] || "").toLowerCase();
+          const isCancelled =
+            poStatus.includes("[poยกเลิก]") || poNumber.includes("[poยกเลิก]");
 
-        // Calculate total service costs from df_LINE where Category = "Service"
-        const serviceTotal = filteredTab2Data.reduce((sum, row) => {
-          if (row["Category"] === "Service") {
+          if (!isCancelled) {
             const amount = parseFloat(
               row["Total Amount"]?.toString().replace(/,/g, "") || "0",
             );
             return sum + amount;
+          }
+          return sum;
+        }, 0);
+        setTotalAmount(total);
+
+        // Calculate total service costs from df_LINE where Category = "Service" (exclude cancelled POs)
+        const serviceTotal = filteredTab2Data.reduce((sum, row) => {
+          if (row["Category"] === "Service") {
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
+
+            if (!isCancelled) {
+              const amount = parseFloat(
+                row["Total Amount"]?.toString().replace(/,/g, "") || "0",
+              );
+              return sum + amount;
+            }
           }
           return sum;
         }, 0);
         setTotalServiceCosts(serviceTotal);
 
-        // Calculate total material costs from df_LINE where Category = "Material"
+        // Calculate total material costs from df_LINE where Category = "Material" (exclude cancelled POs)
         const materialTotal = filteredTab2Data.reduce((sum, row) => {
           if (row["Category"] === "Material") {
-            const amount = parseFloat(
-              row["Total Amount"]?.toString().replace(/,/g, "") || "0",
-            );
-            return sum + amount;
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
+
+            if (!isCancelled) {
+              const amount = parseFloat(
+                row["Total Amount"]?.toString().replace(/,/g, "") || "0",
+              );
+              return sum + amount;
+            }
           }
           return sum;
         }, 0);
         setTotalMaterialCosts(materialTotal);
 
-        // Calculate total other costs from df_LINE where Category = "Other"
+        // Calculate total other costs from df_LINE where Category = "Other" (exclude cancelled POs)
         const otherTotal = filteredTab2Data.reduce((sum, row) => {
           if (row["Category"] === "Other") {
-            const amount = parseFloat(
-              row["Total Amount"]?.toString().replace(/,/g, "") || "0",
-            );
-            return sum + amount;
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
+
+            if (!isCancelled) {
+              const amount = parseFloat(
+                row["Total Amount"]?.toString().replace(/,/g, "") || "0",
+              );
+              return sum + amount;
+            }
           }
           return sum;
         }, 0);
         setTotalOtherCosts(otherTotal);
 
-        // Process monthly expense data from filtered df_HEADER
+        // Process monthly expense data from filtered df_HEADER (exclude cancelled POs)
         const monthlyExpenseMap = filteredTab1Data.reduce(
           (acc, row) => {
             const dateStr = row["DATE"];
             if (dateStr) {
-              const date = new Date(dateStr);
-              const year = date.getFullYear();
-              const month = date.getMonth() + 1; // 1-12
-              const monthYear = `${year}-${month < 10 ? "0" : ""}${month}`;
+              const poStatus = String(row["PO Status"] || "").toLowerCase();
+              const poNumber = String(row["PO.NO."] || "").toLowerCase();
+              const isCancelled =
+                poStatus.includes("[poยกเลิก]") ||
+                poNumber.includes("[poยกเลิก]");
 
-              const amount = parseFloat(
-                row["Total Amount"]?.toString().replace(/,/g, "") || "0",
-              );
+              if (!isCancelled) {
+                const date = new Date(dateStr);
+                const year = date.getFullYear();
+                const month = date.getMonth() + 1; // 1-12
+                const monthYear = `${year}-${month < 10 ? "0" : ""}${month}`;
 
-              if (!acc[monthYear]) {
-                acc[monthYear] = 0;
+                const amount = parseFloat(
+                  row["Total Amount"]?.toString().replace(/,/g, "") || "0",
+                );
+
+                if (!acc[monthYear]) {
+                  acc[monthYear] = 0;
+                }
+                acc[monthYear] = (acc[monthYear] as number) + amount;
               }
-              acc[monthYear] = (acc[monthYear] as number) + amount;
             }
             return acc;
           },
@@ -264,6 +315,10 @@ export function ProcurementOverview({
         setMonthlyExpenseData(sortedMonthlyData);
 
         // Calculate supplier statistics from filtered df_HEADER
+        console.log("=== DEBUG SUPPLIER CALCULATION ===");
+        console.log("Filtered Tab1 Data Length:", filteredTab1Data.length);
+        console.log("Filters Applied:", filters);
+
         const supplierStats = filteredTab1Data.reduce(
           (acc, row) => {
             const supplierName = String(row["Supplier Name"]);
@@ -271,7 +326,62 @@ export function ProcurementOverview({
               String(row["Total Amount"]?.toString().replace(/,/g, "") || "0"),
             );
 
-            if (supplierName && supplierName.trim() !== "" && amount > 0) {
+            // Debug for specific supplier
+            if (supplierName.includes("ออล ไอ แคน 3536")) {
+              const poStatusForDebug = String(
+                row["PO Status"] || "",
+              ).toLowerCase();
+              const poNumberForDebug = String(
+                row["PO.NO."] || "",
+              ).toLowerCase();
+              const dateStrForDebug = String(row["DATE"] || "");
+              const yearForDebug = dateStrForDebug
+                ? new Date(dateStrForDebug).getFullYear()
+                : "N/A";
+              console.log("Found All I Can 3536 row:", {
+                supplier: supplierName,
+                amount: amount,
+                date: row["DATE"],
+                year: yearForDebug,
+                poNumber: row["PO.NO."] || "N/A",
+                poStatus: row["PO Status"] || "N/A",
+                poStatusLower: poStatusForDebug,
+                poNumberLower: poNumberForDebug,
+                containsCancel:
+                  poStatusForDebug.includes("[poยกเลิก]") ||
+                  poNumberForDebug.includes("[poยกเลิก]"),
+                willCount:
+                  !poStatusForDebug.includes("[poยกเลิก]") &&
+                  !poNumberForDebug.includes("[poยกเลิก]"),
+              });
+            }
+
+            // Check if PO is cancelled (exclude cancelled POs)
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
+
+            // Debug for cancelled POs
+            if (isCancelled) {
+              console.log("CANCELLED PO FOUND:", {
+                supplier: supplierName,
+                amount: amount,
+                poNumber: row["PO.NO."],
+                poStatus: row["PO Status"],
+                poStatusLower: poStatus,
+                poNumberLower: poNumber,
+                date: row["DATE"],
+              });
+            }
+
+            if (
+              supplierName &&
+              supplierName.trim() !== "" &&
+              amount > 0 &&
+              !isCancelled
+            ) {
               if (!acc[supplierName]) {
                 acc[supplierName] = {
                   name: supplierName,
@@ -302,18 +412,26 @@ export function ProcurementOverview({
             );
             const dateStr = String(row["DATE"] || "");
 
+            // Check if PO is cancelled (exclude cancelled POs)
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
+
             if (
               supplierName &&
               supplierName.trim() !== "" &&
               amount > 0 &&
-              dateStr
+              dateStr &&
+              !isCancelled
             ) {
               const rowYear = new Date(dateStr).getFullYear();
               if (rowYear === previousYear) {
                 if (!acc[supplierName]) {
                   acc[supplierName] = 0;
                 }
-                acc[supplierName] += amount;
+                acc[supplierName] += Number(amount);
               }
             }
             return acc;
@@ -353,17 +471,38 @@ export function ProcurementOverview({
           ),
         }));
 
+        // Debug final results
+        const allICanSupplier = suppliersWithShare.find((s) =>
+          s.name.includes("ออล ไอ แคน 3536"),
+        );
+        if (allICanSupplier) {
+          console.log("=== ALL I CAN 3536 FINAL RESULT ===");
+          console.log("Total Amount:", allICanSupplier.totalAmount);
+          console.log("PO Count:", allICanSupplier.poCount);
+          console.log("Spend Share:", allICanSupplier.spendShare);
+          console.log("Expected: 19,269,110.02");
+          console.log("Difference:", 19269110.02 - allICanSupplier.totalAmount);
+        }
+
         setSupplierData(suppliersWithShare);
         setCurrentPage(1); // Reset to first page when data changes
 
-        // Calculate category spending from df_LINE (filteredLineData)
+        // Calculate category spending from df_LINE (filteredLineData) (exclude cancelled POs)
         const categorySpend = filteredLineData.reduce(
           (acc, row) => {
-            const category = String(row["Category"] || "Unknown");
-            const amount = parseFloat(String(row["Amount"] || "0"));
+            const poStatus = String(row["PO Status"] || "").toLowerCase();
+            const poNumber = String(row["PO.NO."] || "").toLowerCase();
+            const isCancelled =
+              poStatus.includes("[poยกเลิก]") ||
+              poNumber.includes("[poยกเลิก]");
 
-            if (!acc[category]) acc[category] = 0;
-            acc[category] = Number(acc[category]) + amount;
+            if (!isCancelled) {
+              const category = String(row["Category"] || "Unknown");
+              const amount = parseFloat(String(row["Amount"] || "0"));
+
+              if (!acc[category]) acc[category] = 0;
+              acc[category] = Number(acc[category]) + amount;
+            }
 
             return acc;
           },
@@ -455,6 +594,7 @@ export function ProcurementOverview({
           return {
             poNumber: poNumber,
             date: po["DATE"],
+            projectCode: po["Project Code"],
             totalAmount: parseFloat(
               String(po["Total Amount"]?.toString().replace(/,/g, "") || "0"),
             ),
@@ -682,19 +822,18 @@ export function ProcurementOverview({
 
       {/* Supplier Analysis */}
       <ChartContainer
-        title="Supplier Spend Analysis"
-        subtitle="Spend share and growth by supplier"
+        title="Supplier Spending Overview"
+        subtitle="Overview of supplier spending and detailed PO insights"
         delay={0.7}
       >
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-600">
+          <table className="w-full text-left text-sm text-gray-600 table-fixed">
             <thead className="text-xs bg-gray-50 text-gray-900">
               <tr>
-                <th className="px-4 py-3 rounded-l-lg">Rank</th>
-                <th className="px-4 py-3">Supplier Name</th>
-                <th className="px-4 py-3">Total Amount</th>
-                <th className="px-4 py-3">PO count</th>
-                <th className="px-4 py-3 rounded-r-lg">Spend Share (%)</th>
+                <th className="px-6 py-3 rounded-l-lg w-20">Rank</th>
+                <th className="px-6 py-3 w-[300px]">Supplier Name</th>
+                <th className="px-6 py-3 w-[180px]">Total Amount</th>
+                <th className="px-6 py-3 rounded-r-lg w-28">PO count</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -708,7 +847,7 @@ export function ProcurementOverview({
                     key={supplier.name}
                     className="hover:bg-gray-50 transition-colors"
                   >
-                    <td className="px-4 py-3 font-medium text-gray-900">
+                    <td className="px-6 py-3 font-medium text-gray-900">
                       <span
                         className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                           (currentPage - 1) * itemsPerPage + index === 0
@@ -723,27 +862,19 @@ export function ProcurementOverview({
                         {(currentPage - 1) * itemsPerPage + index + 1}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-900 font-medium">
+                    <td className="px-6 py-3 text-gray-900 font-medium">
                       {supplier.name}
                     </td>
-                    <td className="px-4 py-3 text-gray-900 font-bold">
+                    <td className="px-6 py-3 text-gray-900 font-bold">
                       {supplier.totalAmount.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-6 py-3">
                       <button
                         onClick={() => handlePOCountClick(supplier.name)}
                         className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium hover:bg-blue-100 transition-colors cursor-pointer"
                       >
                         {supplier.poCount} POs
                       </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <span className="text-blue-600 font-medium text-sm">
-                          {supplier.spendShare}%
-                        </span>
-                        <span className="text-xs text-gray-500">Share</span>
-                      </div>
                     </td>
                   </tr>
                 ))}
@@ -883,10 +1014,7 @@ export function ProcurementOverview({
             <div className="px-6 py-4 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">
-                  PO Details -{" "}
-                  {selectedSupplierPOs[0]?.poNumber
-                    ? `PO ${selectedSupplierPOs[0]?.poNumber}`
-                    : "Supplier POs"}
+                  PO Details
                 </h3>
                 <button
                   onClick={closeModal}
@@ -923,16 +1051,20 @@ export function ProcurementOverview({
                     >
                       <div className="flex items-center justify-between mb-3">
                         <div>
-                          <h4 className="font-semibold text-gray-900">
-                            PO #{po.poNumber}
-                          </h4>
+                          <h3 className="font-semibold text-lg">
+                            {po.poNumber}{" "}
+                            {po.projectCode && `- ${po.projectCode}`}
+                          </h3>
                           <p className="text-sm text-gray-500">
                             {po.date
-                              ? new Date(po.date).toLocaleDateString()
+                              ? new Date(po.date).toISOString().split("T")[0]
                               : "No date"}
                           </p>
                         </div>
                         <div className="text-right">
+                          <p className="text-xs text-gray-500 mb-1">
+                            Total Amount (Incl. VAT, Less Discount)
+                          </p>
                           <p className="text-lg font-bold text-gray-900">
                             {po.totalAmount.toLocaleString()}
                           </p>
@@ -947,14 +1079,14 @@ export function ProcurementOverview({
                           <table className="w-full text-sm">
                             <thead className="bg-gray-50">
                               <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 lowercase tracking-wider">
-                                  category
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 tracking-wider">
+                                  Category
                                 </th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 lowercase tracking-wider">
-                                  description
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 tracking-wider">
+                                  Description
                                 </th>
-                                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 lowercase tracking-wider">
-                                  amount
+                                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 tracking-wider">
+                                  Amount
                                 </th>
                               </tr>
                             </thead>

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { ProcurementOverview } from "./components/ProcurementOverview";
-import { CategoryAnalysis } from "./components/CategoryAnalysis";
+import { CostInsights } from "./components/CostInsights";
 import { ForecastPlanning } from "./components/ForecastPlanning";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -14,12 +14,12 @@ export default function App() {
     switch (currentView) {
       case "overview":
         return "Procurement Overview";
-      case "analysis":
-        return "Category Analysis";
+      case "insight":
+        return "Supplier & Cost Intelligence";
       case "forecast":
         return "Forecast & Planning";
       default:
-        return "Dashboard";
+        return "Data Source";
     }
   };
 
@@ -49,7 +49,7 @@ export default function App() {
               {currentView === "overview" && (
                 <ProcurementOverview filters={filters} />
               )}
-              {currentView === "analysis" && <CategoryAnalysis />}
+              {currentView === "insight" && <CostInsights />}
               {currentView === "forecast" && <ForecastPlanning />}
             </motion.div>
           </AnimatePresence>

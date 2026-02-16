@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { User, ChevronDown, RotateCcw, Upload } from "lucide-react";
+import {
+  User,
+  ChevronDown,
+  RotateCcw,
+  Upload,
+  Search,
+  Bell,
+  Settings,
+} from "lucide-react";
 import { getTab1Data } from "../../services/googleSheetsService";
 import * as XLSX from "xlsx";
 
@@ -16,6 +24,8 @@ export function Header({
   const [allProjects, setAllProjects] = useState<string[]>([]);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
   const [importing, setImporting] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -172,7 +182,7 @@ export function Header({
       console.log("Upload result:", result);
 
       alert(
-        "นำเข้าข้อมูลสำเร็จแล้ว!\n\nDebug info:\n" +
+        "Data imported successfully!\n\nDebug info:\n" +
           JSON.stringify(result, null, 2),
       );
 
@@ -180,7 +190,7 @@ export function Header({
       window.location.reload();
     } catch (error) {
       console.error("Import error:", error);
-      alert("นำเข้าข้อมูลไม่สำเร็จ: " + error);
+      alert("Data import failed: " + error);
     } finally {
       setImporting(false);
     }
@@ -320,79 +330,74 @@ export function Header({
   };
 
   return (
-    <div className="h-auto bg-slate-950/80 backdrop-blur-sm sticky top-0 z-40">
-      <div className="h-16 flex items-center justify-between px-8 border-b border-slate-800">
-        <h2 className="text-lg font-semibold text-white tracking-wide">
-          {title}
-        </h2>
+    <div className="h-auto bg-white border-b border-gray-200 sticky top-0 z-40">
+      <div className="h-16 flex items-center justify-between px-6">
+        {/* Left Section - Title */}
+        <div className="flex items-center">
+          <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+        </div>
 
-        {/* Filter Section - Top Right */}
-        <div className="flex gap-3 items-center">
-          <div className="min-w-[120px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">
-              {/* Year */}
-            </label>
-            <select
-              value={selectedYear}
-              onChange={(e) => handleYearChange(e.target.value)}
-              className="w-full px-2 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded text-slate-300 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Years</option>
-              {availableYears.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Right Section - Filters, Import */}
+        <div className="flex items-center gap-3">
+          {/* Filter Controls */}
+          <div className="flex items-center gap-3">
+            <div className="min-w-[120px]">
+              <select
+                value={selectedYear}
+                onChange={(e) => handleYearChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Years</option>
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="min-w-[140px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">
-              {/* Project */}
-            </label>
-            <select
-              value={selectedProject}
-              onChange={(e) => handleProjectChange(e.target.value)}
-              className="w-full px-2 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded text-slate-300 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="all">All Projects</option>
-              {projects.map((project) => (
-                <option key={project} value={project}>
-                  {project}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className="min-w-[140px]">
+              <select
+                value={selectedProject}
+                onChange={(e) => handleProjectChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Projects</option>
+                {projects.map((project) => (
+                  <option key={project} value={project}>
+                    {project}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="flex flex-col justify-end">
             <button
               onClick={handleClearFilters}
-              className="px-4 py-2 text-sm bg-slate-900 hover:bg-slate-700 border border-slate-700 rounded text-slate-300 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg text-gray-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               title="Clear Filter"
             >
-              Clear
+              <RotateCcw size={16} />
             </button>
           </div>
 
-          <div className="flex flex-col justify-end">
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleFileUpload}
-              className="hidden"
-              id="file-upload"
-              disabled={importing}
-            />
-            <button
-              onClick={() => document.getElementById("file-upload")?.click()}
-              disabled={importing}
-              className="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 border border-green-600 rounded text-white focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              title="Import Data"
-            >
-              <Upload size={16} />
-              {importing ? "กำลังนำเข้า..." : "นำเข้าข้อมูล"}
-            </button>
-          </div>
+          {/* Import Button */}
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleFileUpload}
+            className="hidden"
+            id="file-upload"
+            disabled={importing}
+          />
+          <button
+            onClick={() => document.getElementById("file-upload")?.click()}
+            disabled={importing}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 border border-blue-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            title="Import Data"
+          >
+            <Upload size={16} />
+            {importing ? "Processing import..." : "Import Data"}
+          </button>
         </div>
       </div>
     </div>
