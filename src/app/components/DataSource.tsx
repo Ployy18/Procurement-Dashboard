@@ -21,6 +21,15 @@ import {
   Cell,
 } from "recharts";
 import { ChartContainer } from "./ChartContainer";
+import {
+  getTab1Data,
+  getTab2Data,
+  getMainSheetData,
+  getSheetNames,
+  getSheetDataByName,
+  addNewSheet,
+  addSheetURL,
+} from "../../services/googleSheetsService";
 
 interface DataSourceConfig {
   id: string;
@@ -43,13 +52,22 @@ interface DataSourceItem {
 }
 
 export function DataSource() {
+  const [sheetData, setSheetData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<
+    "connected" | "disconnected" | "syncing"
+  >("connected");
+  const [selectedTab, setSelectedTab] = useState<string>("P65019_ปี2565");
+  const [currentData, setCurrentData] = useState<any[]>([]);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+
   const [configs, setConfigs] = useState<DataSourceConfig[]>([
     {
       id: "1",
       name: "Google Sheets - df_HEADER",
       type: "google-sheets",
-      status: "connected",
-      lastSync: "2025-02-16 10:30:00",
+      status: syncStatus,
+      lastSync: new Date().toLocaleString(),
       url: "https://docs.google.com/spreadsheets/d/...",
     },
     {
@@ -67,10 +85,12 @@ export function DataSource() {
       id: "1",
       name: "Purchase Orders",
       type: "Main Dataset",
-      size: "2.4 MB",
-      records: 1250,
-      lastUpdated: "2025-02-16 09:15:00",
-      status: "active",
+      size: loading
+        ? "Loading..."
+        : `${(sheetData.length * 0.5).toFixed(2)} KB`,
+      records: loading ? 0 : sheetData.length,
+      lastUpdated: loading ? "Loading..." : new Date().toLocaleString(),
+      status: syncStatus === "connected" ? "active" : "inactive",
     },
     {
       id: "2",
@@ -92,27 +112,147 @@ export function DataSource() {
     },
   ]);
 
+  // Initialize available sheets and check for new sheets periodically
+  useEffect(() => {
+    const sheets = getSheetNames();
+    setAvailableSheets(sheets);
+
+    // Set up interval to check for new sheets every 30 seconds
+    const interval = setInterval(() => {
+      const updatedSheets = getSheetNames();
+      if (updatedSheets.length > sheets.length) {
+        // New sheets detected
+        const newSheets = updatedSheets.filter(
+          (sheet) => !sheets.includes(sheet),
+        );
+        newSheets.forEach((sheet) => {
+          console.log(`New sheet detected: ${sheet}`);
+        });
+        setAvailableSheets(updatedSheets);
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch data from Google Sheets on component mount and tab change
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setSyncStatus("syncing");
+
+        // Fetch data specific to the selected sheet
+        const data = await getSheetDataByName(selectedTab);
+
+        setSheetData(data.rows);
+        setCurrentData(data.rows);
+
+        // Update data items with real data
+        const realRecords = data.rows.length;
+        const realSize = (
+          JSON.stringify(data.rows).length /
+          1024 /
+          1024
+        ).toFixed(2);
+        const currentTime = new Date().toLocaleString();
+
+        setDataItems((prev) =>
+          prev.map((item) =>
+            item.id === "1"
+              ? {
+                  ...item,
+                  records: realRecords,
+                  size: `${realSize} MB`,
+                  lastUpdated: currentTime,
+                }
+              : item,
+          ),
+        );
+
+        setSyncStatus("connected");
+      } catch (error) {
+        console.error(`Error fetching data for sheet ${selectedTab}:`, error);
+        setSyncStatus("disconnected");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (availableSheets.length > 0) {
+      fetchData();
+    }
+  }, [selectedTab, availableSheets]);
+
+  const handleRefresh = async () => {
+    try {
+      setSyncStatus("syncing");
+
+      // Fetch data specific to the selected sheet
+      const data = await getSheetDataByName(selectedTab);
+
+      setSheetData(data.rows);
+      setCurrentData(data.rows);
+
+      const realRecords = data.rows.length;
+      const realSize = (JSON.stringify(data.rows).length / 1024 / 1024).toFixed(
+        2,
+      );
+      const currentTime = new Date().toLocaleString();
+
+      setDataItems((prev) =>
+        prev.map((item) =>
+          item.id === "1"
+            ? {
+                ...item,
+                records: realRecords,
+                size: `${realSize} MB`,
+                lastUpdated: currentTime,
+              }
+            : item,
+        ),
+      );
+
+      setConfigs((prev) =>
+        prev.map((config) =>
+          config.type === "google-sheets"
+            ? { ...config, lastSync: currentTime }
+            : config,
+        ),
+      );
+
+      setSyncStatus("connected");
+    } catch (error) {
+      console.error(`Error refreshing data for sheet ${selectedTab}:`, error);
+      setSyncStatus("disconnected");
+    }
+  };
+
   const [selectedConfig, setSelectedConfig] = useState<string>("1");
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const handleSync = async (configId: string) => {
-    setIsSyncing(true);
-    // Simulate sync process
-    setTimeout(() => {
-      setConfigs((prev) =>
-        prev.map((config) =>
-          config.id === configId
-            ? {
-                ...config,
-                status: "connected" as const,
-                lastSync: new Date().toLocaleString(),
-              }
-            : config,
-        ),
+    await handleRefresh();
+    setIsSyncing(false);
+  };
+
+  const handleAddNewSheet = () => {
+    const sheetName = prompt("กรุณาใส่ชื่อชีทใหม่:");
+    if (sheetName && sheetName.trim()) {
+      const cleanSheetName = sheetName.trim();
+      addNewSheet(cleanSheetName);
+
+      // Add URL for the new sheet (using default URL pattern)
+      const newSheetURL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vQpap4q0Sdy5O1x5WNDuI3ZurwY3LNSbtDilGliHHfDgePvHDFHBsSQ30_InxxY2Pysz_LOXHVhl_cp/pub?gid=${Date.now()}&single=true&output=csv`;
+      addSheetURL(cleanSheetName, newSheetURL);
+
+      const updatedSheets = getSheetNames();
+      setAvailableSheets(updatedSheets);
+      setSelectedTab(cleanSheetName);
+      console.log(
+        `Added new sheet: ${cleanSheetName} with URL: ${newSheetURL}`,
       );
-      setIsSyncing(false);
-    }, 2000);
+    }
   };
 
   const handleTestConnection = async (configId: string) => {
@@ -133,7 +273,7 @@ export function DataSource() {
             : config,
         ),
       );
-    }, 1500);
+    }, 2000);
   };
 
   const getStatusColor = (status: string) => {
@@ -170,12 +310,35 @@ export function DataSource() {
         subtitle="Configure and monitor your data connections"
         delay={0.1}
       >
+        {/* Tab Selection */}
+        <div className="flex gap-2 mb-6 border-b border-gray-200 overflow-x-auto">
+          {availableSheets.map((sheetName) => (
+            <button
+              key={sheetName}
+              onClick={() => setSelectedTab(sheetName)}
+              className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
+                selectedTab === sheetName
+                  ? "text-blue-600 border-blue-600"
+                  : "text-gray-500 border-transparent hover:text-gray-700"
+              }`}
+            >
+              {sheetName}
+            </button>
+          ))}
+        </div>
+
         <div className="flex gap-4 mb-6">
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+          <button
+            onClick={handleAddNewSheet}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+          >
             <Upload size={16} />
-            Add New Source
+            Add New Sheet
           </button>
-          <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+          >
             <RefreshCw size={16} />
             Refresh All
           </button>
@@ -274,61 +437,53 @@ export function DataSource() {
           ))}
         </div>
 
-        {/* Data Items Summary */}
+        {/* Data Table */}
         <div className="mt-8">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Data Items Summary
+            Data Table - {selectedTab}
           </h3>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-gray-600">
-              <thead className="text-xs bg-gray-50 text-gray-900">
-                <tr>
-                  <th className="px-4 py-3 text-left rounded-l-lg">Name</th>
-                  <th className="px-4 py-3 text-left">Type</th>
-                  <th className="px-4 py-3 text-left">Size</th>
-                  <th className="px-4 py-3 text-left">Records</th>
-                  <th className="px-4 py-3 text-left">Last Updated</th>
-                  <th className="px-4 py-3 text-left rounded-r-lg">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {dataItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      {item.name}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{item.type}</td>
-                    <td className="px-4 py-3 text-gray-600">{item.size}</td>
-                    <td className="px-4 py-3 text-gray-900 font-medium">
-                      {item.records.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {item.lastUpdated}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium ${
-                          item.status === "active"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="animate-spin mr-2" size={20} />
+              <span>Loading data...</span>
+            </div>
+          ) : currentData.length > 0 ? (
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {Object.keys(currentData[0]).map((header, index) => (
+                      <th
+                        key={index}
+                        className="px-4 py-3 text-left font-medium text-gray-900 border-r border-gray-200 last:border-r-0"
                       >
-                        <div
-                          className={`w-2 h-2 rounded-full ${
-                            item.status === "active"
-                              ? "bg-green-600"
-                              : "bg-gray-400"
-                          }`}
-                        />
-                        {item.status}
-                      </span>
-                    </td>
+                        {header}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {currentData.map((row, rowIndex) => (
+                    <tr key={rowIndex} className="hover:bg-gray-50">
+                      {Object.values(row).map((value, colIndex) => (
+                        <td
+                          key={colIndex}
+                          className="px-4 py-3 text-gray-600 border-r border-gray-200 last:border-r-0"
+                        >
+                          {value?.toString() || ""}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              No data available
+            </div>
+          )}
         </div>
 
         {/* API Key Section */}

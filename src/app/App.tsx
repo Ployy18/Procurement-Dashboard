@@ -4,6 +4,7 @@ import { Header } from "./components/Header";
 import { ProcurementOverview } from "./components/ProcurementOverview";
 import { CostInsights } from "./components/CostInsights";
 import { ForecastPlanning } from "./components/ForecastPlanning";
+import { DataSource } from "./components/DataSource";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -35,7 +36,11 @@ export default function App() {
       <Sidebar currentView={currentView} onChangeView={setCurrentView} />
 
       <div className="pl-20 flex flex-col min-h-screen">
-        <Header title={getTitle()} onFilterChange={handleFilterChange} />
+        <Header
+          title={getTitle()}
+          onFilterChange={handleFilterChange}
+          showFilters={currentView !== "forecast"}
+        />
 
         <main className="flex-1 p-8">
           <AnimatePresence mode="wait">
@@ -51,6 +56,7 @@ export default function App() {
               )}
               {currentView === "insight" && <CostInsights />}
               {currentView === "forecast" && <ForecastPlanning />}
+              {currentView === "data-source" && <DataSource />}
             </motion.div>
           </AnimatePresence>
         </main>

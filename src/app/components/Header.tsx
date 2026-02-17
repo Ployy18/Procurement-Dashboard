@@ -14,9 +14,11 @@ import * as XLSX from "xlsx";
 export function Header({
   title,
   onFilterChange,
+  showFilters = true,
 }: {
   title: string;
   onFilterChange: (filters: { year: string; project: string }) => void;
+  showFilters?: boolean | { projectOnly: true };
 }) {
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
@@ -340,45 +342,52 @@ export function Header({
         {/* Right Section - Filters, Import */}
         <div className="flex items-center gap-3">
           {/* Filter Controls */}
-          <div className="flex items-center gap-3">
-            <div className="min-w-[120px]">
-              <select
-                value={selectedYear}
-                onChange={(e) => handleYearChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="all">All Years</option>
-                {availableYears.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {(showFilters === true ||
+            (typeof showFilters === "object" && showFilters.projectOnly)) && (
+            <div className="flex items-center gap-3">
+              {/* Year Filter - only show if not projectOnly */}
+              {showFilters === true && (
+                <div className="min-w-[120px]">
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => handleYearChange(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="all">All Years</option>
+                    {availableYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-            <div className="min-w-[140px]">
-              <select
-                value={selectedProject}
-                onChange={(e) => handleProjectChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="all">All Projects</option>
-                {projects.map((project) => (
-                  <option key={project} value={project}>
-                    {project}
-                  </option>
-                ))}
-              </select>
-            </div>
+              {/* Project Filter - always show when filters are enabled */}
+              <div className="min-w-[140px]">
+                <select
+                  value={selectedProject}
+                  onChange={(e) => handleProjectChange(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="all">All Projects</option>
+                  {projects.map((project) => (
+                    <option key={project} value={project}>
+                      {project}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <button
-              onClick={handleClearFilters}
-              className="px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg text-gray-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              title="Clear Filter"
-            >
-              <RotateCcw size={16} />
-            </button>
-          </div>
+              <button
+                onClick={handleClearFilters}
+                className="px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg text-gray-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                title="Clear Filter"
+              >
+                <RotateCcw size={16} />
+              </button>
+            </div>
+          )}
 
           {/* Import Button */}
           <input
