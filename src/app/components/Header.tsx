@@ -9,22 +9,28 @@ import {
   Settings,
 } from "lucide-react";
 import { getTab1Data } from "../../services/googleSheetsService";
+import Papa from "papaparse";
+import { getSheetNames, addNewSheet } from "../../services/googleSheetsService";
 import * as XLSX from "xlsx";
 
-export function Header({
-  title,
-  onFilterChange,
-  showFilters = true,
-}: {
+interface HeaderProps {
   title: string;
   onFilterChange: (filters: { year: string; project: string }) => void;
   showFilters?: boolean | { projectOnly: true };
-}) {
+}
+
+export function Header({ title, onFilterChange, showFilters }: HeaderProps) {
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [projects, setProjects] = useState<string[]>([]);
   const [allProjects, setAllProjects] = useState<string[]>([]);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
+  const [showDestinationDialog, setShowDestinationDialog] = useState(false);
+  const [selectedSheet, setSelectedSheet] = useState<string>("");
+  const [shouldCreateChart, setShouldCreateChart] = useState(false);
+  const [newSheetName, setNewSheetName] = useState("");
+  const [isNewSheet, setIsNewSheet] = useState(false);
+  const [uploadData, setUploadData] = useState<any[] | null>(null);
   const [importing, setImporting] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
@@ -177,25 +183,121 @@ export function Header({
 
     setImporting(true);
     try {
-      const data = await readExcelFile(file);
+      // Check API URL first
+      const apiUrl = import.meta.env.VITE_APPS_SCRIPT_URL;
+      if (!apiUrl || apiUrl.includes("YOUR_SCRIPT_ID") || apiUrl.length < 10) {
+        throw new Error(
+          "API URL ยังไม่ถูกตั้งค่า กรุณาตรวจสอบ .env file และตั้งค่า Google Apps Script URL",
+        );
+      }
+
+      // Dynamic file processing based on file type
+      let data: any[] = [];
+
+      if (file.name.endsWith(".csv")) {
+        data = await readCSVFile(file);
+      } else if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
+        data = await readExcelFile(file);
+      } else {
+        throw new Error(
+          "Unsupported file format. Please use CSV, XLSX, or XLS files.",
+        );
+      }
+
       console.log("Data read from file:", data);
 
-      const result = await uploadToGoogleSheets(data);
+      // Validate data
+      if (!data || data.length === 0) {
+        throw new Error("ไม่พบข้อมูลในไฟล์ กรุณาตรวจสอบข้อมูลในไฟล์");
+      }
+
+      // Store data for later use after destination selection
+      setUploadData(data);
+
+      // Show destination selection dialog
+      const destination = await selectDestination();
+
+      // Validate destination
+      if (!destination || !destination.sheet) {
+        throw new Error("กรุณาเลือก sheet ปลายทาง");
+      }
+
+      // Process upload
+      const result = await uploadToGoogleSheets(data, destination);
       console.log("Upload result:", result);
 
+      // Success handling
+      const chartMessage = destination.createChart ? " พร้อมสร้างแผนภูมิ" : "";
       alert(
-        "Data imported successfully!\n\nDebug info:\n" +
-          JSON.stringify(result, null, 2),
+        `นำเข้าข้อมูลสำเร็จไปยัง sheet: ${destination.sheet}${chartMessage}!\n\nจำนวนข้อมูล: ${data.length} แถว`,
       );
 
       // Refresh data
       window.location.reload();
     } catch (error) {
       console.error("Import error:", error);
-      alert("Data import failed: " + error);
+
+      // Better error handling
+      let errorMessage = "เกิดข้อผิดพลาดในการนำเข้าข้อมูล";
+
+      if (error instanceof Error) {
+        if (error.message.includes("API URL")) {
+          errorMessage = "❌ ตั้งค่า API: " + error.message;
+        } else if (error.message.includes("Unsupported file")) {
+          errorMessage = "❌ รูปแบบไฟล์ไม่รองรับ: " + error.message;
+        } else if (error.message.includes("ไม่พบข้อมูล")) {
+          errorMessage = "❌ ไฟล์ว่างเปล่า: " + error.message;
+        } else if (error.message.includes("sheet ปลายทาง")) {
+          errorMessage = "❌ กรุณาเลือก sheet: " + error.message;
+        } else {
+          errorMessage = "❌ ข้อผิดพลาด: " + error.message;
+        }
+      }
+
+      alert(errorMessage);
     } finally {
       setImporting(false);
+      setShowDestinationDialog(false);
+      setUploadData(null);
     }
+  };
+
+  const readCSVFile = (file: File): Promise<any[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = e.target?.result as string;
+          Papa.parse(text, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results: any) => {
+              resolve(results.data as any[]);
+            },
+            error: (error: any) => {
+              reject(error);
+            },
+          });
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsText(file);
+    });
+  };
+
+  const selectDestination = async (): Promise<{
+    sheet: string;
+    createChart: boolean;
+  }> => {
+    return new Promise((resolve, reject) => {
+      setShowDestinationDialog(true);
+
+      // Store the resolve function to be called when user confirms
+      (window as any).resolveDestination = resolve;
+      (window as any).rejectDestination = reject;
+    });
   };
 
   const readExcelFile = (file: File): Promise<any[]> => {
@@ -218,7 +320,10 @@ export function Header({
     });
   };
 
-  const uploadToGoogleSheets = async (data: any[]) => {
+  const uploadToGoogleSheets = async (
+    data: any[],
+    destination: { sheet: string; createChart: boolean },
+  ): Promise<any> => {
     // ใช้ Apps Script API แทนการส่งไปยัง Google Sheets โดยตรง
     const apiUrl = import.meta.env.VITE_APPS_SCRIPT_URL;
 
@@ -228,6 +333,7 @@ export function Header({
     console.log("All env keys:", Object.keys(import.meta.env));
     console.log("Final API URL:", apiUrl);
     console.log("Uploading data to Apps Script:", data);
+    console.log("Destination:", destination);
 
     // ตรวจสอบว่า URL ถูกต้องหรือไม่
     if (!apiUrl || apiUrl.includes("YOUR_SCRIPT_ID") || apiUrl.length < 10) {
@@ -256,7 +362,7 @@ export function Header({
       const getResult = await getResponse.json();
       console.log("GET test result:", getResult);
 
-      // Test 2: POST request with simple data
+      // Test 2: POST request with enhanced data
       console.log("Testing POST request...");
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -264,8 +370,10 @@ export function Header({
           "Content-Type": "text/plain",
         },
         body: JSON.stringify({
-          action: "importAndProcess",
+          action: "importAndCreateChart",
           data: data,
+          destination: destination.sheet,
+          createChart: destination.createChart,
         }),
       });
 
@@ -308,27 +416,43 @@ export function Header({
     }
   };
 
-  const convertToCSV = (data: any[]): string => {
-    if (!data || data.length === 0) return "";
+  const handleConfirmDestination = () => {
+    const { resolveDestination } = window as any;
 
-    // ดึง headers จากแถวแรก
-    const headers = Object.keys(data[0]);
+    if (!resolveDestination) {
+      console.error("Resolve function not found");
+      return;
+    }
 
-    // แปลงข้อมูลเป็น CSV
-    const csvRows = data.map((row) => {
-      return headers
-        .map((header) => {
-          const value = row[header] || "";
-          // จัดการกับค่าที่มี comma หรือ newline
-          const escapedValue = String(value).replace(/"/g, '""');
-          return `"${escapedValue}"`;
-        })
-        .join(",");
+    let destinationSheet = "";
+
+    if (isNewSheet) {
+      if (!newSheetName.trim()) {
+        alert("กรุณาระบุชื่อ sheet ใหม่");
+        return;
+      }
+      destinationSheet = newSheetName.trim();
+      addNewSheet(destinationSheet);
+    } else {
+      if (!selectedSheet) {
+        alert("กรุณาเลือก sheet ปลายทาง");
+        return;
+      }
+      destinationSheet = selectedSheet;
+    }
+
+    resolveDestination({
+      sheet: destinationSheet,
+      createChart: shouldCreateChart,
     });
+  };
 
-    // รวม headers และ rows
-    const csvContent = [headers.join(","), ...csvRows].join("\n");
-    return csvContent;
+  const handleCancelDestination = () => {
+    const { rejectDestination } = window as any;
+    if (rejectDestination) {
+      rejectDestination(new Error("Destination selection cancelled"));
+    }
+    setShowDestinationDialog(false);
   };
 
   return (
@@ -409,6 +533,135 @@ export function Header({
           </button>
         </div>
       </div>
+
+      {/* Destination Selection Dialog */}
+      {showDestinationDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                เลือก Sheet ปลายทาง
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                เลือก sheet ที่มีอยู่หรือสร้าง sheet ใหม่สำหรับนำเข้าข้อมูล
+              </p>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-4">
+              {/* Sheet Type Selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  ประเภท Sheet
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsNewSheet(false);
+                      setSelectedSheet("");
+                    }}
+                    className={`flex-1 px-4 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                      !isNewSheet
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"
+                    }`}
+                  >
+                    เลือก Sheet ที่มีอยู่
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsNewSheet(true);
+                      setNewSheetName("");
+                    }}
+                    className={`flex-1 px-4 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                      isNewSheet
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"
+                    }`}
+                  >
+                    สร้าง Sheet ใหม่
+                  </button>
+                </div>
+              </div>
+
+              {/* Existing Sheet Selection */}
+              {!isNewSheet && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    เลือก Sheet
+                  </label>
+                  <select
+                    value={selectedSheet}
+                    onChange={(e) => setSelectedSheet(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">-- เลือก Sheet --</option>
+                    {getSheetNames().map((sheet) => (
+                      <option key={sheet} value={sheet}>
+                        {sheet}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* New Sheet Name */}
+              {isNewSheet && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ชื่อ Sheet ใหม่
+                  </label>
+                  <input
+                    type="text"
+                    value={newSheetName}
+                    onChange={(e) => setNewSheetName(e.target.value)}
+                    placeholder="เช่น Project_2024"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {/* Chart Creation Option */}
+              <div className="mb-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={shouldCreateChart}
+                    onChange={(e) => setShouldCreateChart(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      สร้างแผนภูมิอัตโนมัติ
+                    </span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      สร้างแผนภูมิจากข้อมูลที่นำเข้า (Amount, Status, Timeline,
+                      Category)
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={handleCancelDestination}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleConfirmDestination}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                นำเข้าข้อมูล
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
