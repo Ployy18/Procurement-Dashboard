@@ -38,20 +38,30 @@ export function DataUpload() {
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     console.log(" [DataUpload] Files dropped:", acceptedFiles);
-    
+
     const selectedFile = acceptedFiles[0];
-    if (selectedFile && (selectedFile.type === "text/csv" || selectedFile.name.endsWith(".csv") || selectedFile.name.endsWith(".xlsx") || selectedFile.name.endsWith(".xls"))) {
+    if (
+      selectedFile &&
+      (selectedFile.type === "text/csv" ||
+        selectedFile.name.endsWith(".csv") ||
+        selectedFile.name.endsWith(".xlsx") ||
+        selectedFile.name.endsWith(".xls"))
+    ) {
       console.log(" [DataUpload] Valid file detected:", {
         name: selectedFile.name,
         size: selectedFile.size,
         type: selectedFile.type,
-        lastModified: new Date(selectedFile.lastModified)
+        lastModified: new Date(selectedFile.lastModified),
       });
-      
+
       setFile(selectedFile);
       handleFileProcess(selectedFile);
     } else {
-      console.error(" [DataUpload] Invalid file type:", selectedFile?.name, selectedFile?.type);
+      console.error(
+        " [DataUpload] Invalid file type:",
+        selectedFile?.name,
+        selectedFile?.type,
+      );
       toast.error("Please upload a valid CSV or Excel file");
     }
   }, []);
@@ -73,11 +83,14 @@ export function DataUpload() {
     setIsProcessing(true);
     try {
       let data: any[] = [];
-      
+
       if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
         console.log("📊 [DataUpload] Processing Excel file...");
         data = await DataCleaningService.parseExcel(file);
-        console.log("✅ [DataUpload] Excel parsing completed, rows:", data.length);
+        console.log(
+          "✅ [DataUpload] Excel parsing completed, rows:",
+          data.length,
+        );
       } else {
         console.log("📋 [DataUpload] Processing CSV file...");
         // PapaParse for CSV
@@ -104,22 +117,22 @@ export function DataUpload() {
 
       console.log("🧹 [DataUpload] Starting data cleaning...");
       console.log("📊 [DataUpload] Raw data sample:", data.slice(0, 3));
-      
+
       setRawData(data);
       const cleaned = DataCleaningService.cleanData(data);
-      
+
       console.log("✨ [DataUpload] Data cleaning completed:", {
         originalRows: data.length,
         cleanedRows: cleaned.length,
-        filteredRows: data.length - cleaned.length
+        filteredRows: data.length - cleaned.length,
       });
       console.log("📋 [DataUpload] Cleaned data sample:", cleaned.slice(0, 2));
-      
+
       setCleanedData(cleaned);
       setIsProcessing(false);
       setStep("preview");
       toast.success(`Successfully processed ${cleaned.length} rows`);
-      
+
       console.log("🎯 [DataUpload] Processing completed successfully!");
     } catch (error) {
       console.error("💥 [DataUpload] File Processing Error:", error);
@@ -137,19 +150,22 @@ export function DataUpload() {
 
   const handleCommit = async () => {
     console.log("💾 [DataUpload] Starting data commit process...");
-    
+
     if (!file || cleanedData.length === 0) {
-      console.error("❌ [DataUpload] Cannot commit - missing file or no cleaned data:", {
-        hasFile: !!file,
-        cleanedDataLength: cleanedData.length
-      });
+      console.error(
+        "❌ [DataUpload] Cannot commit - missing file or no cleaned data:",
+        {
+          hasFile: !!file,
+          cleanedDataLength: cleanedData.length,
+        },
+      );
       return;
     }
 
     console.log("📤 [DataUpload] Preparing to upload:", {
       fileName: file.name,
       dataRows: cleanedData.length,
-      dataSample: cleanedData.slice(0, 2)
+      dataSample: cleanedData.slice(0, 2),
     });
 
     setIsProcessing(true);
@@ -157,7 +173,7 @@ export function DataUpload() {
       // Upload to Google Sheets via Node.js Backend
       console.log("🌐 [DataUpload] Sending data to backend...");
       const result = await uploadMultiTableData(cleanedData, file.name);
-      
+
       console.log("📨 [DataUpload] Backend response:", result);
 
       if (result.success) {
@@ -287,29 +303,46 @@ export function DataUpload() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {cleanedData.slice(0, 50).map((row, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell className="font-medium text-gray-600">
-                            {row.date}
-                          </TableCell>
-                          <TableCell>{row.poNumber}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">
-                            {row.supplierName}
-                          </TableCell>
-                          <TableCell className="max-w-[300px] truncate">
-                            {row.itemDescription}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold text-blue-600">
-                            {row.totalPrice.toLocaleString()} ฿
-                          </TableCell>
-                          <TableCell>
-                            <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-600">
-                              {row.category}
-                            </span>
-                          </TableCell>
-                          <TableCell>{row.projectCode}</TableCell>
-                        </TableRow>
-                      ))}
+                      {cleanedData.slice(0, 50).map((row, idx) => {
+                        const isLine = row.rowType === "LINE";
+                        const description = isLine
+                          ? (row as any).description
+                          : (row as any).description2 || "PO Header";
+                        const category = isLine ? (row as any).category : "-";
+
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell className="font-medium text-gray-600">
+                              {row.date}
+                            </TableCell>
+                            <TableCell>
+                              {row.poNumber}
+                              {!isLine && (
+                                <span className="ml-2 text-[10px] bg-blue-100 text-blue-800 px-1 rounded">
+                                  HEAD
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="max-w-[200px] truncate">
+                              {row.supplierName}
+                            </TableCell>
+                            <TableCell className="max-w-[300px] truncate">
+                              {description}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-blue-600">
+                              {row.totalAmount?.toLocaleString()} ฿
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${isLine ? "bg-gray-100 text-gray-600" : "text-gray-400"}`}
+                              >
+                                {category}
+                              </span>
+                            </TableCell>
+                            <TableCell>{row.projectCode}</TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>

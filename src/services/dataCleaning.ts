@@ -3,7 +3,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 
 export interface RawDataRow {
-  [key: string]: string | number | null | undefined;
+  [key: string]: string | number | null | undefined | boolean;
 }
 
 export interface CleanedDataRow {
@@ -20,10 +20,15 @@ export interface CleanedDataRow {
   engineerName: string;
   category: string;
   sourceSheet?: string;
+  _isHead?: boolean;
+  _isLine?: boolean;
+  _headPO?: string;
 }
 
 export interface MultiTableData {
   procurement_data: CleanedDataRow[];
+  procurement_head: CleanedDataRow[]; // New: Head table
+  procurement_line: CleanedDataRow[]; // New: Line table
   suppliers_master: { name: string; last_seen: string }[];
   categories_master: { name: string; description: string }[];
   upload_logs: {
@@ -31,7 +36,10 @@ export interface MultiTableData {
     filename: string;
     row_count: number;
     status: string;
+    sheets_processed?: number;
+    sheet_details?: { sheet: string; rows: number }[];
   }[];
+  dataBySheet?: Record<string, CleanedDataRow[]>; // New: Data grouped by sheet
 }
 
 /**
@@ -81,18 +89,43 @@ export const DataCleaningService = {
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: "array" });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet) as RawDataRow[];
-
-          console.log("✅ [DataCleaningService] Excel parsing completed:", {
-            sheets: workbook.SheetNames,
-            selectedSheet: firstSheetName,
-            rowsParsed: jsonData.length,
-            sampleRow: jsonData[0],
+          
+          console.log("📋 [DataCleaningService] Found sheets:", workbook.SheetNames);
+          
+          let allData: RawDataRow[] = [];
+          
+          // Process ALL sheets in the workbook
+          for (const sheetName of workbook.SheetNames) {
+            console.log(`📄 [DataCleaningService] Processing sheet: ${sheetName}`);
+            
+            const worksheet = workbook.Sheets[sheetName];
+            const sheetData = XLSX.utils.sheet_to_json(worksheet) as RawDataRow[];
+            
+            // Add sheet source information
+            const sheetDataWithSource = sheetData.map(row => ({
+              ...row,
+              _sourceSheet: sheetName,
+              _sheetIndex: workbook.SheetNames.indexOf(sheetName)
+            }));
+            
+            console.log(`✅ [DataCleaningService] Sheet "${sheetName}" completed:`, {
+              rowsParsed: sheetDataWithSource.length,
+              sampleRow: sheetDataWithSource[0]
+            });
+            
+            allData = allData.concat(sheetDataWithSource);
+          }
+          
+          console.log("📊 [DataCleaningService] All sheets parsing completed:", {
+            totalSheets: workbook.SheetNames.length,
+            totalRows: allData.length,
+            sheetsProcessed: workbook.SheetNames
           });
 
-          resolve(jsonData);
+          // Check if this is Head/Line structure (apply to all data)
+          const processedData = this.processHeadLineStructure(allData);
+
+          resolve(processedData);
         } catch (err) {
           console.error("❌ [DataCleaningService] Excel parsing error:", err);
           reject(err);
@@ -107,48 +140,214 @@ export const DataCleaningService = {
   },
 
   /**
+   * Process Excel files with Head/Line structure
+   */
+  processHeadLineStructure(rawData: RawDataRow[]): RawDataRow[] {
+    console.log("🔧 [DataCleaningService] Processing Head/Line structure...");
+
+    const processedRows: RawDataRow[] = [];
+    let currentHead: any = null;
+
+    // Define search keys matching isValidRow/processRow logic
+    const poKeys = [
+      "PO",
+      "PO_Number",
+      "เลขที่ PO",
+      "PO.NO.",
+      "PO NO",
+      "NO.PO",
+      "No.PO",
+      "__EMPTY_1",
+    ];
+    const dateKeys = ["DATE", "Date", "วันที่", "PO Date", "__EMPTY_2"];
+    const supplierKeys = ["Supplier", "ผู้ขาย", "ชื่อผู้ขาย", "Supplier Name", "Vendor", "__EMPTY_3", "__EMPTY_4", "__EMPTY_5", "__EMPTY_6"];
+
+    // Helper function to check if row is a header row (contains column names)
+    const isHeaderRow = (row: RawDataRow): boolean => {
+      const rowValues = Object.values(row).map(v => v?.toString().toLowerCase() || "");
+      const headerKeywords = ["ผู้ขาย", "supplier", "วันที่", "date", "po", "รายการ", "description", "จำนวน", "quantity"];
+      
+      // Check if row contains multiple header keywords
+      const headerMatches = rowValues.filter(value => 
+        headerKeywords.some(keyword => value.includes(keyword))
+      ).length;
+      
+      return headerMatches >= 2; // If row contains 2+ header keywords, it's likely a header row
+    };
+
+    for (let i = 0; i < rawData.length; i++) {
+      const row = rawData[i];
+
+      // Skip header rows (rows with column names)
+      if (isHeaderRow(row)) {
+        console.log("⏭️ [DataCleaningService] Skipping header row:", Object.values(row));
+        continue;
+      }
+
+      // Find PO value using shared logic to detect Head row
+      const poValue = this.findValue(row, poKeys);
+
+      // LOGIC: If row has a PO number, it is a HEAD row.
+      if (poValue && poValue.toString().trim() !== "") {
+        // This is a HEAD row
+        currentHead = { ...row };
+        currentHead._isHead = true;
+        
+        // Extract supplier from E6 column for Head rows (based on image analysis)
+        const supplierValue = this.findValue(row, supplierKeys);
+        if (supplierValue) {
+          currentHead["Supplier"] = supplierValue;
+        }
+        
+        // Ensure PO is accessible via standard key if needed (optional but helpful)
+        if (!currentHead["PO"]) currentHead["PO"] = poValue;
+
+        processedRows.push(currentHead);
+        console.log("📋 [DataCleaningService] Found Head row:", poValue, "Supplier:", supplierValue);
+      }
+      // LOGIC: If row has NO PO number, but we have a currentHead, it is a LINE row.
+      else if (currentHead) {
+        // This is a LINE row - needs parent context to be valid
+        const mergedRow = { ...row };
+
+        // Inject Head context so it passes isValidRow and processRow grabs correct info
+        mergedRow["PO"] =
+          currentHead["PO"] || this.findValue(currentHead, poKeys);
+        mergedRow["Date"] = this.findValue(currentHead, dateKeys);
+        mergedRow["Supplier"] = this.findValue(currentHead, supplierKeys);
+
+        // Mark as Line
+        mergedRow._isLine = true;
+        mergedRow._headPO = mergedRow["PO"];
+
+        processedRows.push(mergedRow);
+        console.log("📝 [DataCleaningService] Added Line row for PO:", mergedRow["PO"]);
+      }
+      // Else: No PO and No Head context -> Skip (likely header junk or empty rows)
+    }
+
+    console.log("📊 [DataCleaningService] Head/Line processing completed:", {
+      originalRows: rawData.length,
+      processedRows: processedRows.length,
+      headerRowsSkipped: rawData.length - processedRows.length,
+      headRows: processedRows.filter((r) => r._isHead).length,
+      lineRows: processedRows.filter((r) => r._isLine).length,
+    });
+
+    return processedRows;
+  },
+
+  /**
    * Process data into multiple tables
    */
   processMultiTableData(
     cleanedData: CleanedDataRow[],
     filename: string,
   ): MultiTableData {
-    // 1. Procurement Data (Already cleaned)
-    const procurement_data = cleanedData;
+    // Separate Head and Line data
+    const headData = cleanedData.filter((row) => (row as any)._isHead);
+    const lineData = cleanedData.filter((row) => (row as any)._isLine);
+    
+    // Group data by source sheet
+    const dataBySheet = cleanedData.reduce((acc, row) => {
+      const sheetName = (row as any)._sourceSheet || 'Unknown';
+      if (!acc[sheetName]) acc[sheetName] = [];
+      acc[sheetName].push(row);
+      return acc;
+    }, {} as Record<string, CleanedDataRow[]>);
+    
+    console.log("📊 [DataCleaningService] Data grouped by sheets:", {
+      totalSheets: Object.keys(dataBySheet).length,
+      sheetNames: Object.keys(dataBySheet),
+      sheetDataCounts: Object.entries(dataBySheet).map(([sheet, data]) => ({
+        sheet,
+        rows: data.length,
+        heads: data.filter(r => (r as any)._isHead).length,
+        lines: data.filter(r => (r as any)._isLine).length
+      }))
+    });
+    
+    // 1. Combined procurement data (for backward compatibility)
+    const procurement_data = lineData; // Use line data as main data
+    
+    // 2. Head table (PO headers only)
+    const procurement_head = headData.map((row) => ({
+      ...row,
+      // Map head-specific fields
+      date: row.date,
+      poNumber: row.poNumber,
+      supplierName: row.supplierName,
+      itemDescription: "HEADER", // Mark as header
+      quantity: 0,
+      unit: "HEADER",
+      projectCode: row.projectCode,
+      unitPrice: 0,
+      totalPrice: 0,
+      vatRate: row.vatRate,
+      engineerName: row.engineerName,
+      category: "HEADER",
+      sourceSheet: row.sourceSheet,
+    }));
 
-    // 2. Suppliers Master (Unique suppliers)
+    // 3. Line table (PO line items)
+    const procurement_line = lineData.map((row) => ({
+      ...row,
+      // Map line-specific fields
+      date: row.date,
+      poNumber: row.poNumber,
+      supplierName: row.supplierName,
+      itemDescription: row.itemDescription,
+      quantity: row.quantity,
+      unit: row.unit,
+      projectCode: row.projectCode,
+      unitPrice: row.unitPrice,
+      totalPrice: row.totalPrice,
+      vatRate: row.vatRate,
+      engineerName: row.engineerName,
+      category: row.category,
+      sourceSheet: row.sourceSheet,
+    }));
+
+    // 4. Suppliers Master (Unique suppliers from line data)
     const uniqueSuppliers = [
-      ...new Set(cleanedData.map((row) => row.supplierName)),
+      ...new Set(lineData.map((row) => row.supplierName)),
     ];
     const suppliers_master = uniqueSuppliers.map((name) => ({
       name,
       last_seen: format(new Date(), "yyyy-MM-dd HH:mm:ss"),
     }));
 
-    // 3. Categories Master (Unique categories)
-    const uniqueCategories = [
-      ...new Set(cleanedData.map((row) => row.category)),
-    ];
+    // 5. Categories Master (Unique categories from line data)
+    const uniqueCategories = [...new Set(lineData.map((row) => row.category))];
     const categories_master = uniqueCategories.map((name) => ({
       name,
       description: `Auto-generated category for ${name}`,
     }));
 
-    // 4. Upload Logs
+    // 6. Upload Logs
     const upload_logs = [
       {
         timestamp: format(new Date(), "yyyy-MM-dd HH:mm:ss"),
         filename: filename,
-        row_count: cleanedData.length,
+        row_count: lineData.length,
         status: "Success",
+        sheets_processed: Object.keys(dataBySheet).length,
+        sheet_details: Object.entries(dataBySheet).map(([sheet, data]) => ({
+          sheet,
+          rows: data.length
+        }))
       },
     ];
 
     return {
       procurement_data,
+      procurement_head,
+      procurement_line,
       suppliers_master,
       categories_master,
       upload_logs,
+      // Add sheet-specific data for advanced processing
+      dataBySheet: dataBySheet as any,
     };
   },
 
@@ -168,6 +367,8 @@ export const DataCleaningService = {
       "เลขที่ PO",
       "PO.NO.",
       "PO NO",
+      "NO.PO",
+      "No.PO",
       "__EMPTY_1", // For Excel files with merged headers
     ]);
 
@@ -221,6 +422,8 @@ export const DataCleaningService = {
         "เลขที่ PO",
         "PO.NO.",
         "PO NO",
+        "NO.PO",
+        "No.PO",
         "__EMPTY_1", // For Excel files with merged headers
       ]) || ""
     )
@@ -280,7 +483,10 @@ export const DataCleaningService = {
       "Total Amount",
       "TotalValue",
       "__EMPTY_6", // For Excel merged headers
+      "__EMPTY_7", // Alternative location for Amount
       "__EMPTY_8", // Alternative location
+      "__EMPTY_9", // Additional location
+      "__EMPTY_10", // Additional location
     ]);
 
     const quantity = this.parseNumber(rawQty) || 1;
@@ -288,19 +494,35 @@ export const DataCleaningService = {
     const totalPrice = quantity * unitPrice;
 
     // 6. Extract VAT and Engineer
-    const rawVat = this.findValue(row, ["VAT", "ภาษี", "VAT_Rate"]);
+    const rawVat = this.findValue(row, [
+      "VAT", 
+      "ภาษี", 
+      "VAT_Rate",
+      "__EMPTY_11", // Excel column for VAT
+      "__EMPTY_12"  // Alternative VAT location
+    ]);
     const rawEngineer = this.findValue(row, [
       "Engineer",
       "ผู้อนุมัติ",
       "วิศวกร",
       "Engineer_Name",
+      "__EMPTY_13", // Excel column for Engineer
+      "__EMPTY_14"  // Alternative Engineer location
     ]);
 
     const vatRate = this.formatVat(rawVat?.toString() || "");
     const engineerName = rawEngineer?.toString().trim() || "Unassigned";
 
-    // 7. Auto Category
-    const rawCategory = this.findValue(row, ["Category"]);
+    // 7. Auto Category - Enhanced with Excel columns
+    const rawCategory = this.findValue(row, [
+      "Category",
+      "หมวดหมู่",
+      "ประเภท",
+      "__EMPTY_15", // Excel column for Category
+      "__EMPTY_16", // Alternative Category location
+      "__EMPTY_17", // Additional Category location
+      "__EMPTY_18", // Additional Category location
+    ]);
     const category = rawCategory
       ? rawCategory.toString()
       : this.autoCategorize(itemDescription);
@@ -319,6 +541,9 @@ export const DataCleaningService = {
       engineerName,
       category,
       sourceSheet: row.Source_Sheet?.toString() || "Web Upload",
+      _isHead: (row as any)._isHead,
+      _isLine: (row as any)._isLine,
+      _headPO: (row as any)._headPO,
     };
   },
 
@@ -333,7 +558,8 @@ export const DataCleaningService = {
       const key = Object.keys(row).find(
         (k) => k.toLowerCase() === header.toLowerCase(),
       );
-      if (key && row[key] !== undefined && row[key] !== null) return row[key];
+      if (key && row[key] !== undefined && row[key] !== null)
+        return row[key] as string | number | null | undefined;
     }
     return null;
   },
@@ -344,42 +570,51 @@ export const DataCleaningService = {
   parseDate(dateValue: any): string {
     if (!dateValue) return format(new Date(), "yyyy-MM-dd");
 
-    // Handle Excel numeric date
-    if (typeof dateValue === "number") {
-      const excelEpoch = new Date(1899, 11, 30);
-      const date = new Date(
-        excelEpoch.getTime() + (dateValue - 1) * 24 * 60 * 60 * 1000,
-      );
-      return format(date, "yyyy-MM-dd");
+    let dateStr = dateValue.toString().trim();
+    
+    // Handle Excel serial date numbers (common issue)
+    if (typeof dateValue === "number" && dateValue > 40000) {
+      console.log("📅 [DataCleaningService] Detected Excel serial date:", dateValue);
+      
+      // Excel serial date starts from 1900-01-01 (day 1)
+      const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
+      const daysSinceEpoch = dateValue - 1; // Excel uses 1-based indexing
+      const parsedDate = new Date(excelEpoch.getTime() + daysSinceEpoch * 24 * 60 * 60 * 1000);
+      
+      const result = format(parsedDate, "yyyy-MM-dd");
+      console.log("✅ [DataCleaningService] Converted serial date:", dateValue, "→", result);
+      return result;
     }
-
-    const dateStr = dateValue.toString().trim();
-
-    // Try multiple formats
-    const formats = [
-      "dd/MM/yyyy",
-      "MM/dd/yyyy",
-      "yyyy-MM-dd",
-      "dd-MM-yyyy",
-      "yyyy/MM/dd",
-    ];
-    for (const f of formats) {
-      try {
-        const parsed = parse(dateStr, f, new Date());
-        if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
-      } catch (e) {}
+    
+    // Handle various date formats from app_script.js
+    if (dateStr.includes('/')) {
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        const year = parts[2];
+        return `${year}-${month}-${day}`;
+      }
     }
-
-    // Native Date fallback
-    const nativeParsed = new Date(dateStr);
-    if (isValid(nativeParsed)) return format(nativeParsed, "yyyy-MM-dd");
-
+    
+    // Handle YYYY-MM-DD format
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return dateStr;
+    }
+    
+    // Try to parse with date-fns for other formats
+    const formats = ['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'dd-MM-yyyy'];
+    for (const fmt of formats) {
+      const parsed = parse(dateStr, fmt, new Date());
+      if (isValid(parsed)) {
+        return format(parsed, 'yyyy-MM-dd');
+      }
+    }
+    
+    console.warn("⚠️ [DataCleaningService] Could not parse date:", dateStr, "Type:", typeof dateValue);
     return format(new Date(), "yyyy-MM-dd");
   },
 
-  /**
-   * Standardize number parsing
-   */
   parseNumber(value: any): number {
     if (!value) return 0;
     if (typeof value === "number") return value;
@@ -387,9 +622,6 @@ export const DataCleaningService = {
     return parseFloat(cleanStr) || 0;
   },
 
-  /**
-   * Split fields like "Supplier Name - Item Description"
-   */
   splitCombinedField(value: string): {
     supplierName: string;
     itemDescription: string;
@@ -402,9 +634,6 @@ export const DataCleaningService = {
     };
   },
 
-  /**
-   * Split fields like "Unit - Project Code"
-   */
   splitProjectUnit(value: string): { unit: string; projectCode: string } {
     const parts = value.split(/[-–—]/);
     if (parts.length < 2) return { unit: value, projectCode: "" };
@@ -414,44 +643,33 @@ export const DataCleaningService = {
     };
   },
 
-  /**
-   * Ensure VAT matches format "X%"
-   */
   formatVat(value: string): string {
     const clean = value.replace(/[^0-9]/g, "");
     if (!clean) return "7%";
     return `${clean}%`;
   },
 
-  /**
-   * Intelligent categorization
-   */
   autoCategorize(description: string): string {
     const desc = description.toLowerCase();
-    if (
-      desc.includes("คอม") ||
-      desc.includes("computer") ||
-      desc.includes("laptop")
-    )
-      return "IT Equipment";
-    if (
-      desc.includes("โต๊ะ") ||
-      desc.includes("เก้าอี้") ||
-      desc.includes("furniture")
-    )
-      return "Furniture";
-    if (
-      desc.includes("ค่าแรง") ||
-      desc.includes("labor") ||
-      desc.includes("service")
-    )
-      return "Services";
-    if (
-      desc.includes("เหล็ก") ||
-      desc.includes("ปูน") ||
-      desc.includes("material")
-    )
-      return "Construction";
-    return "Office Supplies";
+    
+    // Enhanced categories from app_script.js
+    const categories = {
+      'CCTV': ['cctv', 'camera', 'กล้อง', 'วงจร', 'กล้องวงจร'],
+      'IT Equipment': ['computer', 'laptop', 'server', 'คอม', 'เซิร์ฟเวอร์', 'คอมพิวเตอร์'],
+      'Office Supplies': ['paper', 'pen', 'desk', 'กระดาษ', 'ปากกา', 'โต๊ะ', 'เก้าอี้'],
+      'Network': ['router', 'switch', 'cable', 'เน็ตเวิร์ก', 'สายแลน', 'สายเครือข่าย'],
+      'Software': ['license', 'software', 'ซอฟต์แวร์', 'ลิขสิทธิ์', 'โปรแกรม'],
+      'Construction': ['เหล็ก', 'ปูน', 'material', 'วัสดุ', 'ก่อสร้าง'],
+      'Services': ['ค่าแรง', 'labor', 'service', 'บริการ', 'ติดตั้ง'],
+      'Furniture': ['โต๊ะ', 'เก้าอี้', 'furniture', 'เฟอร์นิเจอร์']
+    };
+    
+    for (const [category, keywords] of Object.entries(categories)) {
+      if (keywords.some(keyword => desc.includes(keyword))) {
+        return category;
+      }
+    }
+    
+    return 'Other';
   },
 };
