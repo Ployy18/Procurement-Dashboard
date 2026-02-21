@@ -175,11 +175,19 @@ async function writeTableToSheet(sheetName, data) {
         },
       });
     } else {
-      // Clear existing data - specifically A1:Z (adjust if more columns are needed)
-      await sheets.spreadsheets.values.clear({
+      // Clear existing data - specifically A1:ZZ (expand range for more columns)
+      const gridData = await sheets.spreadsheets.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${sheetName}!A1:Z`,
+        range: `${sheetName}!A1:ZZ1`,
       });
+      
+      // Only clear if there's actual data
+      if (gridData.data.values && gridData.data.values.length > 0) {
+        await sheets.spreadsheets.values.clear({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${sheetName}!A1:ZZ`,
+        });
+      }
     }
 
     // Write new data
@@ -332,27 +340,43 @@ app.post("/api/upload", async (req, res) => {
 
   try {
     // Process and split data
+    console.log("🔍 [Server] Processing data for upload:", {
+      totalRows: data.length,
+      filename: filename
+    });
+    
     const tables = DataCleaningService.processMultiTableData(
       data,
       filename || "web-upload.xlsx",
     );
+    
+    console.log("📊 [Server] Processed tables:", {
+      procurementData: tables.procurement_data.length,
+      procurementHead: tables.procurement_head.length,
+      procurementLine: tables.procurement_line.length,
+      suppliers: tables.suppliers_master.length,
+      categories: tables.categories_master.length
+    });
 
     const results = {};
 
-    // 1. Procurement Data (Overwrite) - Line items only
-    results.procurement = await writeTableToSheet(
+    // 1. Procurement Data (Append) - Use line items only for main data
+    console.log("💾 [Server] Appending procurement_data with", tables.procurement_line.length, "rows");
+    results.procurement = await appendTableToSheet(
       "procurement_data",
-      tables.procurement_data,
+      tables.procurement_line, // Use line data instead of combined data
     );
 
-    // 2. Procurement Head (Overwrite) - PO headers only
-    results.head = await writeTableToSheet(
+    // 2. Procurement Head (Append) - PO headers only
+    console.log("💾 [Server] Appending procurement_head with", tables.procurement_head.length, "rows");
+    results.head = await appendTableToSheet(
       "procurement_head",
       tables.procurement_head,
     );
 
-    // 3. Procurement Line (Overwrite) - Line items separate
-    results.line = await writeTableToSheet(
+    // 3. Procurement Line (Append) - Line items separate
+    console.log("💾 [Server] Appending procurement_line with", tables.procurement_line.length, "rows");
+    results.line = await appendTableToSheet(
       "procurement_line",
       tables.procurement_line,
     );
@@ -361,16 +385,18 @@ app.post("/api/upload", async (req, res) => {
     if (tables.dataBySheet) {
       for (const [sheetName, sheetData] of Object.entries(tables.dataBySheet)) {
         const cleanSheetName = sheetName.replace(/[^a-zA-Z0-9_]/g, '_');
+        console.log(`💾 [Server] Writing individual sheet: sheet_${cleanSheetName} with ${sheetData.length} rows`);
         const result = await writeTableToSheet(
           `sheet_${cleanSheetName}`,
           sheetData
         );
         results[`sheet_${cleanSheetName}`] = result;
-        console.log(`📊 Created individual sheet: sheet_${cleanSheetName} with ${sheetData.length} rows`);
+        console.log(`📊 [Server] Created individual sheet: sheet_${cleanSheetName} with ${sheetData.length} rows`);
       }
     }
 
     // 5. Suppliers Master (Update - Only new)
+    console.log("💾 [Server] Writing suppliers_master with", tables.suppliers_master.length, "rows");
     results.suppliers = await updateMasterSheet(
       "suppliers_master",
       tables.suppliers_master,
@@ -378,6 +404,7 @@ app.post("/api/upload", async (req, res) => {
     );
 
     // 6. Categories Master (Update - Only new)
+    console.log("💾 [Server] Writing categories_master with", tables.categories_master.length, "rows");
     results.categories = await updateMasterSheet(
       "categories_master",
       tables.categories_master,
@@ -385,6 +412,7 @@ app.post("/api/upload", async (req, res) => {
     );
 
     // 7. Upload Logs (Append)
+    console.log("💾 [Server] Writing upload_logs with", tables.upload_logs.length, "rows");
     results.logs = await appendTableToSheet("upload_logs", tables.upload_logs);
 
     res.json({
@@ -394,7 +422,7 @@ app.post("/api/upload", async (req, res) => {
         timestamp: new Date().toISOString(),
         filename: filename,
         stats: {
-          procurementRows: tables.procurement_data.length,
+          procurementRows: tables.procurement_line.length, // Use line data length
           headRows: tables.procurement_head.length,
           lineRows: tables.procurement_line.length,
           suppliersCount: tables.suppliers_master.length,
